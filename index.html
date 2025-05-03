@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Ghost Browser</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+        background: #1e1e1e;
+        color: #fff;
+        user-select: none;
+      }
+
+      #container {
+        display: flex;
+        height: 100%;
+      }
+
+      /* Left sidebar (Arc-style) */
+      #sidebar {
+        width: 85px;
+        background: #1a1a1a;
+        padding: 10px 0;
+        box-sizing: border-box;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        box-shadow: 1px 0 5px rgba(0, 0, 0, 0.3);
+        z-index: 10;
+      }
+
+      #sidebar .tab {
+        width: 65px;
+        height: 65px;
+        margin: 8px 0;
+        border-radius: 12px;
+        background: #333;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        transition: background 0.2s ease;
+      }
+
+      #sidebar .tab.active,
+      #sidebar .tab:hover {
+        background: #555;
+      }
+
+      #content {
+        flex: 1;
+        position: relative;
+        display: flex;
+        flex-direction: column;
+      }
+
+      /* Address bar */
+      #addressBar {
+        height: 45px;
+        background: #2a2a2a;
+        display: flex;
+        align-items: center;
+        padding: 0 15px;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+      }
+      
+      #newTabBtn {
+        width: 30px;
+        height: 30px;
+        background: #3a3a3a;
+        border-radius: 15px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        margin-left: 10px;
+        font-size: 18px;
+        user-select: none;
+      }
+      
+      #newTabBtn:hover {
+        background: #4a4a4a;
+      }
+
+      #urlInput {
+        flex: 1;
+        height: 30px;
+        background: #3a3a3a;
+        border: none;
+        border-radius: 15px;
+        color: #fff;
+        padding: 0 15px;
+        font-size: 14px;
+        outline: none;
+      }
+
+      #browser {
+        flex: 1;
+        position: relative;
+      }
+
+      webview {
+        width: 100%;
+        height: 100%;
+        background: white;
+      }
+
+      /* Search overlay */
+      #searchOverlay {
+        position: fixed;
+        top: 0;
+        left: 85px;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.85);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.25s ease;
+        z-index: 1000;
+      }
+
+      #searchOverlay.active {
+        opacity: 1;
+        pointer-events: auto;
+      }
+
+      #searchOverlay input {
+        width: 60%;
+        max-width: 600px;
+        padding: 18px 24px;
+        border: none;
+        border-radius: 50px;
+        background: #2c2c2c;
+        color: #fff;
+        font-size: 20px;
+        outline: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="container">
+      <div id="sidebar"></div>
+      <div id="content">
+        <div id="addressBar">
+          <input type="text" id="urlInput" placeholder="Search or enter address..." />
+          <div id="newTabBtn" title="New Tab (Ctrl+T)">+</div>
+        </div>
+        <div id="browser"></div>
+      </div>
+      <div id="searchOverlay">
+        <input type="text" id="searchInput" placeholder="Search or enter address…" />
+      </div>
+    </div>
+
+    <script>
+      const { ipcRenderer } = require("electron");
+      console.log('Renderer process started');
+
+      const sidebar = document.getElementById("sidebar");
+      const browser = document.getElementById("browser");
+      const searchOverlay = document.getElementById("searchOverlay");
+      const searchInput = document.getElementById("searchInput");
+      const urlInput = document.getElementById("urlInput");
+
+      const tabs = [];
+
+      function createTab(url = "https://www.google.com") {
+        const idx = tabs.length;
+        const tabBtn = document.createElement("div");
+        tabBtn.className = "tab";
+        tabBtn.innerText = idx + 1;
+        tabBtn.onclick = () => switchTab(idx);
+        sidebar.appendChild(tabBtn);
+
+        const view = document.createElement("webview");
+        view.src = url;
+        view.setAttribute("partition", "persist:tab" + idx);
+        view.addEventListener("dom-ready", () => {
+          view.setZoomFactor(1);
+          // Update address bar when page loads
+          urlInput.value = view.getURL();
+        });
+        browser.appendChild(view);
+
+        tabs.push({ button: tabBtn, view });
+        switchTab(idx);
+      }
+
+      function switchTab(index) {
+        tabs.forEach((t, i) => {
+          t.button.classList.toggle("active", i === index);
+          t.view.style.display = i === index ? "block" : "none";
+        });
+        // Update address bar when tab changes
+        if (index >= 0 && index < tabs.length) {
+          const view = tabs[index].view;
+          urlInput.value = view.getURL() || "";
+        }
+      }
+
+      // Handle Ctrl+T from main.
+      ipcRenderer.on("new-tab", () => {
+        console.log('Received new-tab event from main process');
+        showSearch();
+      });
+      
+      // Also provide a button to open new tab
+      document.getElementById('newTabBtn').addEventListener('click', () => {
+        console.log('New tab button clicked');
+        showSearch();
+      });
+
+      function showSearch() {
+        console.log('Showing search overlay');
+        searchOverlay.classList.add("active");
+        setTimeout(() => {
+          searchInput.focus();
+          console.log('Search input focused');
+        }, 100);
+      }
+
+      function hideSearch() {
+        searchOverlay.classList.remove("active");
+        searchInput.value = "";
+      }
+
+      searchInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          const q = searchInput.value.trim();
+          if (q) {
+            // Simple heuristic: if it looks like a URL, treat as URL; else search Google
+            const looksLikeUrl = q.includes(".") && !q.includes(" ");
+            const url = looksLikeUrl ? (q.startsWith("http") ? q : `https://${q}`) : `https://www.google.com/search?q=${encodeURIComponent(q)}`;
+            createTab(url);
+            hideSearch();
+          }
+        } else if (e.key === "Escape") {
+          hideSearch();
+        }
+      });
+
+      // Address bar functionality
+      urlInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          const q = urlInput.value.trim();
+          if (q) {
+            // Get the active webview
+            const activeTabIndex = tabs.findIndex((t) => 
+              t.view.style.display === "block"
+            );
+            
+            if (activeTabIndex >= 0) {
+              const view = tabs[activeTabIndex].view;
+              // Simple heuristic: if it looks like a URL, treat as URL; else search Google
+              const looksLikeUrl = q.includes(".") && !q.includes(" ");
+              const url = looksLikeUrl 
+                ? (q.startsWith("http") ? q : `https://${q}`) 
+                : `https://www.google.com/search?q=${encodeURIComponent(q)}`;
+              view.src = url;
+            }
+          }
+        }
+      });
+
+      // Initial tab
+      createTab();
+      
+      // For debugging
+      window.showSearchManually = showSearch;
+      window.debugInfo = () => {
+        console.log('Tabs:', tabs);
+        console.log('Search overlay visible:', searchOverlay.classList.contains('active'));
+        console.log('Sidebar children:', sidebar.children.length);
+      };
+      
+      // Debug call
+      setTimeout(debugInfo, 1000);
+    </script>
+  </body>
+</html>
